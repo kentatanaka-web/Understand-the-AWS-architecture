@@ -639,6 +639,622 @@ const scenarios = [
           "Visibility Timeoutは再配信のタイミングを左右するため、処理特性に合わせた調整が重要です。"
       }
     ]
+  },
+  {
+    id: "ecs-cache",
+    title: "構成図D: ECS + ElastiCache",
+    description:
+      "ALBからのリクエストをECS Fargate上のアプリが処理し、ElastiCache（Redis）でセッション/キャッシュを管理。永続データはRDSに保存します。",
+    diagram: {
+      viewBox: "0 0 1320 440",
+      zones: [
+        { label: "Internet",         x:  10, y:  30, w:  200, h: 380, tone: "#fff7db" },
+        { label: "AWS Cloud / VPC",  x: 230, y:  30, w: 1070, h: 380, tone: "#eef8ff" },
+        { label: "AZ-a",             x: 260, y:  65, w:  490, h: 155, tone: "#edf6ff" },
+        { label: "AZ-c",             x: 260, y: 240, w:  490, h: 150, tone: "#f0fff8" },
+        { label: "Data Layer",       x: 780, y:  65, w:  490, h: 325, tone: "#fff4f3" }
+      ],
+      nodes: [
+        { id: "user",     label: "User",             x:  20, y: 170, color: "#fef3c7" },
+        { id: "alb",      label: "ALB",              x: 285, y:  90, color: "#dbeafe" },
+        { id: "ecsA",     label: "ECS Fargate (AZ-a)", x: 455, y:  90, color: "#dcfce7" },
+        { id: "ecsC",     label: "ECS Fargate (AZ-c)", x: 455, y: 265, color: "#dcfce7" },
+        { id: "redis",    label: "ElastiCache Redis", x: 810, y: 120, color: "#fde68a" },
+        { id: "rds",      label: "RDS (Primary)",    x: 810, y: 280, color: "#fee2e2" }
+      ],
+      edges: [
+        ["user",  "alb"],
+        ["alb",   "ecsA"],
+        ["alb",   "ecsC"],
+        ["ecsA",  "redis"],
+        ["ecsC",  "redis"],
+        ["ecsA",  "rds"],
+        ["ecsC",  "rds"]
+      ]
+    },
+    questions: [
+      {
+        prompt: "ElastiCache（Redis）をアプリの手前に置く主目的はどれですか？",
+        options: [
+          "DBへの問い合わせ回数を減らしレスポンスを高速化する",
+          "ECSコンテナイメージを配布する",
+          "IAMロールを自動生成する",
+          "ALBのSSL終端を担う"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "コンテナ配布はECR（Elastic Container Registry）の役割です。ElastiCacheはキャッシュ/セッションストアに特化しています。",
+          "IAM管理はIAMサービスの責務で、ElastiCacheには該当機能がありません。",
+          "SSL終端はALBまたはACMが担います。ElastiCacheはデータキャッシュの層です。"
+        ],
+        explanation: "頻繁に参照されるデータをRedisにキャッシュすると、DBアクセスを削減し低レイテンシを実現できます。"
+      },
+      {
+        prompt: "ECSタスクをFargateで動かすメリットとして最も適切なのはどれですか？",
+        options: [
+          "EC2インスタンスのOS管理が必要になる",
+          "コンテナ実行基盤のOSパッチ管理をAWSに委ねられる",
+          "ストレージの物理配線を設計する",
+          "Route 53のゾーン設定が不要になる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "FargateはサーバーレスコンテナでEC2自体を管理する必要がなくなります。EC2管理が増えるのは逆です。",
+          "この選択肢は正解です。",
+          "物理インフラはAWSが管理しており、利用者が配線設計する必要はありません。",
+          "DNS設計はRoute 53の話であり、Fargate採用で不要になるものではありません。"
+        ],
+        explanation: "Fargateにより実行基盤の運用負荷を大幅に削減でき、アプリロジックに集中しやすくなります。"
+      },
+      {
+        prompt: "セッション情報をElastiCacheに保持するメリットはどれですか？",
+        options: [
+          "特定のECSインスタンスにセッションが固定される",
+          "複数ECSインスタンスでセッションを共有できスケール時に安定する",
+          "RDSへの書き込みが必ず増える",
+          "ALBがElastiCacheを直接管理できる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "セッションが特定インスタンスに固定されるのはスティッキーセッション設計です。ElastiCacheを使うことで固定を避けられます。",
+          "この選択肢は正解です。",
+          "セッションをElastiCacheに持つことでRDB書き込みを分散・削減できます。増える方向ではありません。",
+          "ALBはロードバランサであり、ElastiCacheを直接制御する機能はありません。"
+        ],
+        explanation: "分散キャッシュにセッションを置くと、インスタンスが入れ替わってもセッションを継続できます。"
+      },
+      {
+        prompt: "ECSサービスのDesired Countを複数AZに分散する主目的はどれですか？",
+        options: [
+          "AZ障害時も別AZのタスクで処理を継続するため",
+          "IAM権限を最大化するため",
+          "ElastiCacheを削除するため",
+          "ALBログを無効化するため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "IAM権限管理はECSタスクロール設計の話で、マルチAZ配置の目的ではありません。",
+          "ElastiCacheの削除はコスト削減議論であり、高可用性設計の方向性と逆です。",
+          "ALBログは監査・デバッグに有用で、AZ分散とは別の設計判断です。"
+        ],
+        explanation: "複数AZにタスクを分散することで、1AZ障害時も残りのAZでサービスを継続できます。"
+      },
+      {
+        prompt: "ElastiCacheのレプリケーショングループを有効にする理由はどれですか？",
+        options: [
+          "書き込みスループット強化のみが目的",
+          "プライマリ障害時にリードレプリカへ自動フェイルオーバーし可用性を確保する",
+          "ECSタスクのCPU制限を緩和する",
+          "RDSのバックアップを停止する"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "書き込みはプライマリが担当します。レプリカは可用性向上と読み取り分散が主目的です。",
+          "この選択肢は正解です。",
+          "CPU制限はECSタスク定義の設定であり、ElastiCache設定とは無関係です。",
+          "バックアップ停止は可用性設計と逆方向です。レプリケーション有効化の目的ではありません。"
+        ],
+        explanation: "レプリケーショングループにより、Redisプライマリの障害時にもキャッシュ層が継続して機能します。"
+      },
+      {
+        prompt: "ECSタスクにIAMタスクロールを付与する目的はどれですか？",
+        options: [
+          "ホストEC2のルート権限をタスクに付与する",
+          "必要なAWSリソースへの最小権限アクセスをタスク単位で制御する",
+          "ElastiCacheのパスワードを不要にする",
+          "ALBの料金を下げる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "タスクロールはEC2ルート権限とは別の仕組みです。最小権限でタスクごとに分離するのが目的です。",
+          "この選択肢は正解です。",
+          "認証設定はSecrets Managerや環境変数で管理します。IAMタスクロールで直接制御するものではありません。",
+          "料金最適化はリソース設計やスケール設定で取り組む課題です。"
+        ],
+        explanation: "タスクロールにより最小権限をコンテナ単位で割り当て、クレデンシャル管理を安全にできます。"
+      },
+      {
+        prompt: "ALBのヘルスチェックを設定する重要な理由はどれですか？",
+        options: [
+          "不健全なタスクへのトラフィックを自動的に外すため",
+          "ElastiCacheのキャッシュを削除するため",
+          "RDSのスナップショットを取得するため",
+          "ECSイメージをECRへ自動プッシュするため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "キャッシュ管理はアプリ設計またはRedis設定の問題で、ALBの役割ではありません。",
+          "スナップショット取得はRDS設定か運用スクリプトで行います。",
+          "ECRへのプッシュはCI/CDパイプラインの責務です。"
+        ],
+        explanation: "ヘルスチェックにより、起動失敗や異常なタスクへのリクエスト送信を自動的に止められます。"
+      },
+      {
+        prompt: "ECSのサービスオートスケーリングで最初に検討する指標はどれですか？",
+        options: [
+          "ElastiCacheのメモリ残量のみ",
+          "CPUやメモリ使用率、あるいはALBリクエスト数",
+          "RDSのストレージ残量のみ",
+          "IAMポリシー数のみ"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "ElastiCacheは参考値にはなりますが、ECSスケーリングの主要指標にはなりにくいです。",
+          "この選択肢は正解です。",
+          "DBストレージは容量管理の指標で、アプリ処理負荷のスケール判断には使いにくいです。",
+          "IAMポリシー数はセキュリティ管理の話で、負荷指標ではありません。"
+        ],
+        explanation: "CPU/メモリ使用率やリクエスト数を直接見て、適切なタイミングでタスク増減を行うのが基本です。"
+      },
+      {
+        prompt: "このECS+キャッシュ構成でコスト最適化を検討する際の代表的アプローチはどれですか？",
+        options: [
+          "常に最大タスク数で固定する",
+          "Spot FargateやReserved Instanceを使い処理特性に合わせて使い分ける",
+          "ElastiCacheを廃止してRDSへのアクセスを全部戻す",
+          "ALBを削除してEC2に直接アクセスさせる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "最大固定はコスト最大化に向かい、最適化とは逆方向です。",
+          "この選択肢は正解です。",
+          "キャッシュ廃止はDBアクセス増によるコストとレイテンシ悪化を招くリスクがあります。",
+          "ALB削除は単一障害点を作り可用性が下がります。コスト最適化の手段として適切ではありません。"
+        ],
+        explanation: "バッチや開発環境にSpot、本番や安定系にOnDemand/Reservedを組み合わせるのが有効です。"
+      },
+      {
+        prompt: "ECSタスク定義でCPU/メモリを明示的に設定する意義はどれですか？",
+        options: [
+          "タスクの資源消費を制限し予期しない過負荷を防ぐため",
+          "ElastiCacheのノード数を自動決定するため",
+          "RDSのCPUを制御するため",
+          "IAMポリシーのサイズを制限するため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "ElastiCacheのノード設計はキャッシュ利用量やスループット要件で決めます。タスク定義とは独立した設計です。",
+          "RDSのリソース設定はインスタンスタイプや設定パラメータで管理します。",
+          "IAMポリシーは別の設計軸です。タスク資源設定とは無関係です。"
+        ],
+        explanation: "明示設定によりリソース上限が決まり、1タスクの暴走が他タスクに影響するのを防げます。"
+      }
+    ]
+  },
+  {
+    id: "hybrid-network",
+    title: "構成図E: ハイブリッドネットワーク",
+    description:
+      "オンプレミスとAWS VPCをSite-to-Site VPN / Direct Connect で接続するハイブリッド構成です。Transit Gatewayで複数VPCを集約します。",
+    diagram: {
+      viewBox: "0 0 1360 440",
+      zones: [
+        { label: "On-Premises DC",     x:  10, y:  30, w:  280, h: 380, tone: "#fff7db" },
+        { label: "AWS Cloud",          x: 310, y:  30, w: 1030, h: 380, tone: "#eef8ff" },
+        { label: "Transit Gateway Hub",x: 590, y:  70, w:  280, h: 300, tone: "#f0f4ff" },
+        { label: "VPC A (Web/App)",    x: 900, y:  70, w:  410, h: 145, tone: "#f2fcf9" },
+        { label: "VPC B (Shared Svc)", x: 900, y: 245, w:  410, h: 145, tone: "#fff6e8" }
+      ],
+      nodes: [
+        { id: "dc",       label: "Corporate DC",    x:  25, y: 175, color: "#fef3c7" },
+        { id: "cgw",      label: "Customer GW",     x: 330, y: 105, color: "#e0f2fe" },
+        { id: "dx",       label: "Direct Connect",  x: 330, y: 270, color: "#dbeafe" },
+        { id: "tgw",      label: "Transit GW",      x: 620, y: 190, color: "#dcfce7" },
+        { id: "alb",      label: "ALB (VPC A)",     x: 920, y:  95, color: "#f3e8ff" },
+        { id: "shared",   label: "Shared DB/DNS",   x: 920, y: 270, color: "#fee2e2" }
+      ],
+      edges: [
+        ["dc",    "cgw"],
+        ["dc",    "dx"],
+        ["cgw",   "tgw"],
+        ["dx",    "tgw"],
+        ["tgw",   "alb"],
+        ["tgw",   "shared"]
+      ]
+    },
+    questions: [
+      {
+        prompt: "Direct ConnectをSite-to-Site VPNより優先する主な理由はどれですか？",
+        options: [
+          "設定がVPNより常に簡単だから",
+          "専用回線で帯域保証・低レイテンシ・安定性が高い通信が必要なため",
+          "インターネット不要の通信に対して無料で使えるから",
+          "オンプレのOSパッチを自動適用できるから"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "Direct Connectは回線調達や物理接続が必要で、VPNより設定コストが高いです。簡易性ではなく品質が選定理由です。",
+          "この選択肢は正解です。",
+          "Direct Connectは回線・ポート費用が発生します。無料ではありません。",
+          "OSパッチはSSMなど運用ツールの範疇です。接続方式の選定理由にはなりません。"
+        ],
+        explanation: "高帯域・低遅延・安定した通信品質が必要な業務システムではDirect Connectが適しています。"
+      },
+      {
+        prompt: "Transit Gatewayを使う主な利点はどれですか？",
+        options: [
+          "VPC間をフルメッシュのVPC Peeringで接続するより管理が単純化される",
+          "DBのバックアップを自動取得する",
+          "ECSタスク数を制御する",
+          "CloudFrontのTTLを設定する"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "DBバックアップはRDS/Auroraの設定やAWS Backupで管理します。",
+          "ECSスケーリングはサービス設定とオートスケーリングポリシーで制御します。",
+          "TTL設定はCloudFrontディストリビューション設定の話です。"
+        ],
+        explanation: "Transit GatewayはハブとしてVPC間接続を集約し、多数のVPCが増えても管理が線形に増えません。"
+      },
+      {
+        prompt: "Site-to-Site VPNを冗長構成にするために必要な設計はどれですか？",
+        options: [
+          "単一トンネルで十分",
+          "2本のIPsecトンネルを確立しアクティブ/スタンバイで利用する",
+          "Direct ConnectをVPNに変換する",
+          "RDSに接続させる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "単一トンネルは障害時の切り替え手段がなく、可用性が下がります。",
+          "この選択肢は正解です。",
+          "Direct ConnectとVPNは別の接続方式です。変換する機能はありません。",
+          "RDSへの接続とVPN冗長設計は別の設計層です。"
+        ],
+        explanation: "VPNは標準で2トンネルを提供し、片系障害でも通信継続できる設計になっています。"
+      },
+      {
+        prompt: "オンプレのDNSとAWS Route 53 Resolverを連携する目的はどれですか？",
+        options: [
+          "ALBのIPを固定する",
+          "オンプレのホスト名をVPC内から解決できるようにする",
+          "ElastiCacheのキャッシュを同期する",
+          "ECSイメージを配布する"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "ALBのIP固定はIP型ALBやEIPで検討しますが、DNS連携の主目的ではありません。",
+          "この選択肢は正解です。",
+          "キャッシュ同期はデータレプリケーション設計の話で、DNS解決とは別です。",
+          "ECRやイメージ配布はコンテナ基盤の話でDNSの役割ではありません。"
+        ],
+        explanation: "Resolver連携により、ハイブリッド環境でもシームレスなDNS解決が実現できます。"
+      },
+      {
+        prompt: "このハイブリッド構成でセキュリティを高める重要な観点はどれですか？",
+        options: [
+          "すべてのポートを全VPCで0.0.0.0/0許可",
+          "セキュリティグループとNACLで最小必要ポートのみ許可",
+          "IAMを削除して認証を簡略化",
+          "暗号化を無効化して処理速度を上げる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "全ポート全許可は攻撃面を最大化します。最小公開の原則に反します。",
+          "この選択肢は正解です。",
+          "IAM削除は認証・認可基盤の喪失を意味し、深刻なセキュリティリスクになります。",
+          "暗号化無効化はデータ漏洩リスクを高めます。特にハイブリッド接続では暗号化が必須です。"
+        ],
+        explanation: "ハイブリッド接続では通信経路と各サービスのアクセス制御を重ねて設計することが重要です。"
+      },
+      {
+        prompt: "VPC間の通信でTransit Gatewayのルートテーブルを分けるメリットはどれですか？",
+        options: [
+          "すべてのVPCが任意に通信できなくなるので不便になる",
+          "VPCごとに許可する通信先を制御しセグメンテーションを実現できる",
+          "Direct Connectの料金が下がる",
+          "ALBのHTTPS設定が不要になる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "ルートテーブル分離は通信制御の強化であり、利便性の低下ではなくセキュリティ向上が目的です。",
+          "この選択肢は正解です。",
+          "ルートテーブル設計はコスト削減直結の設定ではありません。",
+          "HTTPSはALBやACMで設定するもので、ルートテーブルの話ではありません。"
+        ],
+        explanation: "ルートテーブル分離により、不要なVPC間通信を遮断しセキュリティ境界を維持できます。"
+      },
+      {
+        prompt: "Direct Connect障害時のバックアップとしてSite-to-Site VPNを使う構成の利点はどれですか？",
+        options: [
+          "常にVPNの方が高速なため切り替えが不要",
+          "DX障害時もVPN経由で通信継続でき単一障害点を排除できる",
+          "VPNを使うとDXの費用がゼロになる",
+          "オンプレ機器のリプレースが不要になる"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "VPNはインターネット経由のため、DXより帯域・レイテンシが劣ることが多いです。",
+          "この選択肢は正解です。",
+          "費用は個別に発生し、組み合わせることで片方が無料になるものではありません。",
+          "機器リプレースはインフラライフサイクル管理の話で、冗長構成設計とは独立しています。"
+        ],
+        explanation: "DX+VPN冗長構成により、物理回線障害時もインターネットVPN経由でフォールバックできます。"
+      },
+      {
+        prompt: "AWS Network Firewall をTransit GatewayとVPCの間に挟む主な目的はどれですか？",
+        options: [
+          "ファイアウォールルールで不正トラフィックの検査・遮断を一元管理するため",
+          "RDSへの接続を暗号化するため",
+          "ElastiCacheのデータを削除するため",
+          "ECSのコンテナイメージを検索するため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "DB暗号化はKMSやTLS設定で管理します。Network Firewallは通信検査が主目的です。",
+          "ElastiCacheのデータ管理はアプリ設計の責務です。",
+          "コンテナイメージ管理はECRが担います。"
+        ],
+        explanation: "Network Firewallにより、L7レベルでの検査・IPS機能を使った一元的なトラフィック制御が可能です。"
+      },
+      {
+        prompt: "ハイブリッド構成でCloudTrailを有効にする主目的はどれですか？",
+        options: [
+          "AWSへのAPIコール履歴を記録し監査・インシデント対応に活用するため",
+          "VPNのIPsecキーを自動更新するため",
+          "Transit Gatewayを無効にするため",
+          "Direct Connectの帯域を増やすため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "VPN鍵管理はVPN設定側の話です。CloudTrailはAPI監査ログのサービスです。",
+          "Gateway設定はネットワーク設計の問題で、CloudTrailの役割ではありません。",
+          "帯域増加はDXポート変更やLAG追加で対応します。"
+        ],
+        explanation: "CloudTrailでAWS操作をすべてログに残すことで、セキュリティ調査やコンプライアンス対応を支援します。"
+      },
+      {
+        prompt: "オンプレのアプリがAWS S3へアクセスする際、セキュアな方法として適切なのはどれですか？",
+        options: [
+          "バケットを完全公開にしてアクセスキーなしで接続",
+          "DX/VPN経由でVPC Endpointを使いプライベートに接続する",
+          "S3のURLを全員に共有する",
+          "EC2パブリックIPをホワイトリストに登録する"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "完全公開バケットは意図しない情報漏洩リスクが非常に高く、原則禁止すべきです。",
+          "この選択肢は正解です。",
+          "URL共有では認証制御ができず、誰でもアクセス可能になる恐れがあります。",
+          "IP制限だけでは認証の代替になりません。IP詐称や変動リスクもあります。"
+        ],
+        explanation: "VPC EndpointとPrivateLink経由で接続するとインターネットを経由せず安全にS3アクセスできます。"
+      }
+    ]
+  },
+  {
+    id: "analytics",
+    title: "構成図F: データ分析基盤",
+    description:
+      "S3にデータを集約し、Glueでカタログ化・ETL、Athenaでクエリ、QuickSightでBIダッシュボードを提供するサーバーレス分析基盤です。",
+    diagram: {
+      viewBox: "0 0 1320 440",
+      zones: [
+        { label: "Data Sources",       x:  10, y:  30, w:  240, h: 380, tone: "#fff7db" },
+        { label: "AWS Analytics Platform", x: 270, y:  30, w: 1030, h: 380, tone: "#eef8ff" },
+        { label: "Ingestion",          x: 300, y:  65, w:  230, h: 300, tone: "#f6fffd" },
+        { label: "Storage & Catalog",  x: 560, y:  65, w:  260, h: 300, tone: "#fff6e8" },
+        { label: "Query & Visualize",  x: 850, y:  65, w:  420, h: 300, tone: "#f3f0ff" }
+      ],
+      nodes: [
+        { id: "src",      label: "DB / App Logs",  x:  25, y: 170, color: "#fef3c7" },
+        { id: "kinesis",  label: "Kinesis Firehose", x: 310, y: 105, color: "#dbeafe" },
+        { id: "lambda",   label: "Lambda (transform)", x: 310, y: 260, color: "#dcfce7" },
+        { id: "s3",       label: "S3 Data Lake",   x: 580, y: 105, color: "#e0f2fe" },
+        { id: "glue",     label: "Glue Catalog/ETL", x: 580, y: 260, color: "#fde68a" },
+        { id: "athena",   label: "Athena",          x: 870, y: 105, color: "#f3e8ff" },
+        { id: "qs",       label: "QuickSight",      x: 1060, y: 250, color: "#fee2e2" }
+      ],
+      edges: [
+        ["src",     "kinesis"],
+        ["src",     "lambda"],
+        ["kinesis", "s3"],
+        ["lambda",  "s3"],
+        ["s3",      "glue"],
+        ["s3",      "athena"],
+        ["glue",    "athena"],
+        ["athena",  "qs"]
+      ]
+    },
+    questions: [
+      {
+        prompt: "S3をデータレイクのストレージとして選ぶ主な理由はどれですか？",
+        options: [
+          "リレーショナルJOINを直接実行できるため",
+          "スケーラブルで低コストな非構造化データを含む大量データの保管ができるため",
+          "リアルタイムトランザクション処理が得意なため",
+          "EC2にしか接続できないため"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "JOINはAthenaなどのクエリエンジン側で行います。S3はオブジェクトストレージです。",
+          "この選択肢は正解です。",
+          "トランザクション処理はRDB向けです。S3はバッチ・分析向けの保管が得意です。",
+          "S3はAPIを通じて多様なサービスと連携できます。特定コンピュートに限定されません。"
+        ],
+        explanation: "S3はペタバイト規模まで自動スケールし、多様なデータ形式を低コストで保存できます。"
+      },
+      {
+        prompt: "Kinesis Data Firehoseを使う主な目的はどれですか？",
+        options: [
+          "ストリームデータをS3等へリアルタイム近傍で継続的に配信するため",
+          "EC2インスタンスを自動起動するため",
+          "RDSのバックアップを取得するため",
+          "VPCルーティングを変更するため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "インスタンス管理はEC2 AutoScalingの機能です。",
+          "バックアップはRDS設定かAWS Backupで管理します。",
+          "ルーティングはVPC/Transit Gateway設定の話です。"
+        ],
+        explanation: "Firehoseにより、ストリーミングデータをサーバーレスでS3/Redshiftなどへ継続配信できます。"
+      },
+      {
+        prompt: "Glueデータカタログを使う主目的はどれですか？",
+        options: [
+          "S3に置いたデータのスキーマ情報を管理しAthenaから参照できるようにする",
+          "EC2のOSを管理する",
+          "CloudFrontのキャッシュを設定する",
+          "IAMユーザーを一括作成する"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "OS管理はEC2/SSMの領域です。",
+          "キャッシュ設定はCloudFrontディストリビューション設定です。",
+          "IAM管理はIAMサービスの機能です。"
+        ],
+        explanation: "データカタログはメタデータ管理の中核で、クエリエンジンがデータを理解するために必要です。"
+      },
+      {
+        prompt: "Athenaでクエリコストを削減するために効果的な方法はどれですか？",
+        options: [
+          "S3に全データをCSVで非圧縮で保管する",
+          "Parquetなど列指向圧縮フォーマットを使いパーティショニングする",
+          "すべてのクエリを毎回フルスキャンする",
+          "Athenaを複数リージョンに増やす"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "非圧縮CSVはスキャン量が大きくなりコストが上がります。",
+          "この選択肢は正解です。",
+          "フルスキャンはコスト最大化に向かいます。パーティションやフィルタで絞り込むのが基本です。",
+          "リージョン増加はコスト増になります。フォーマット最適化の方が直接効果的です。"
+        ],
+        explanation: "Athenaはスキャン量課金のため、列指向フォーマット+パーティション設計がコスト管理の要です。"
+      },
+      {
+        prompt: "QuickSightを使う主な理由はどれですか？",
+        options: [
+          "Athenaのクエリ結果をBIダッシュボードで可視化し業務意思決定を支援するため",
+          "EC2のSSH接続を管理するため",
+          "S3のバケットポリシーを自動生成するため",
+          "Lambda関数のデプロイを行うため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "SSHやEC2管理はSSMやEC2コンソールの話です。",
+          "バケットポリシーはS3設定やIAC管理です。",
+          "Lambdaデプロイは開発ツールやCI/CDパイプラインの責務です。"
+        ],
+        explanation: "QuickSightはマネージドBIサービスで、分析結果を視覚化して関係者に共有しやすくします。"
+      },
+      {
+        prompt: "このパイプラインでデータ品質を担保するための観点として適切なのはどれですか？",
+        options: [
+          "S3に入ったデータをすべて無検証で分析に使う",
+          "GlueジョブやLambdaでバリデーションを行い異常データを早期検出する",
+          "QuickSightのみで全データ品質チェックを完結させる",
+          "Athenaを無効化する"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "無検証データで分析すると誤った意思決定につながります。品質管理は設計必須です。",
+          "この選択肢は正解です。",
+          "QuickSightは可視化ツールです。品質チェック機能として使うのは責務外です。",
+          "Athenaはクエリ基盤として必要です。無効化は分析不能を意味します。"
+        ],
+        explanation: "パイプライン上流でデータ品質を確認することで、後段の分析精度と信頼性が上がります。"
+      },
+      {
+        prompt: "S3のデータをライフサイクルポリシーで管理する目的はどれですか？",
+        options: [
+          "古いデータを自動的に低コストストレージ層へ移動または削除しコストを最適化する",
+          "Athenaのクエリ速度を必ず2倍にする",
+          "GlueのETL処理を止める",
+          "QuickSightのダッシュボードを削除する"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "クエリ速度はフォーマットやパーティション設計に依存します。ライフサイクル設定が直接2倍化するわけではありません。",
+          "ライフサイクルはS3オブジェクト管理の機能で、GlueのETL動作を止めるものではありません。",
+          "ダッシュボード管理はQuickSight側の操作です。"
+        ],
+        explanation: "ライフサイクルポリシーでGlacierへの移動や削除を自動化すると長期保管コストを削減できます。"
+      },
+      {
+        prompt: "Lambda変換ステップをKinesisとS3の間に置く理由はどれですか？",
+        options: [
+          "データを受け取った直後に正規化・フィルタリングし品質を上げるため",
+          "RDSへの直接書き込みを増やすため",
+          "VPCを削除するため",
+          "CloudFrontを不要にするため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "分析基盤ではS3に蓄積してクエリで分析するのが基本です。RDS直接書き込みを増やすのは別設計です。",
+          "VPC設計は独立した要件であり、Lambda変換の目的ではありません。",
+          "CloudFront不要化は配信要件の話で、データ変換とは無関係です。"
+        ],
+        explanation: "S3格納前に変換することでダウンストリームのETLやクエリコストを削減しやすくなります。"
+      },
+      {
+        prompt: "このデータ分析基盤でIAMバケットポリシーを厳密に設定する理由はどれですか？",
+        options: [
+          "分析データへのアクセスを必要な人・サービスに限定しデータ漏洩リスクを下げるため",
+          "Athenaのクエリ実行速度を上げるため",
+          "QuickSightのグラフ種類を増やすため",
+          "Glueジョブのメモリを増やすため"
+        ],
+        answer: 0,
+        wrongReasons: [
+          "この選択肢は正解です。",
+          "クエリ速度はデータ形式とパーティションで決まり、バケットポリシーは速度に直接影響しません。",
+          "グラフ種類はQuickSightの機能仕様です。",
+          "GlueのリソースはGlueジョブ設定で管理します。"
+        ],
+        explanation: "S3バケットポリシーとIAMを組み合わせることで、分析基盤全体のアクセス境界を明確にできます。"
+      },
+      {
+        prompt: "大量ログをリアルタイムに近い形で分析したい場合、このパイプラインのどのサービスを中心に検討しますか？",
+        options: [
+          "QuickSightだけでストリーミング処理する",
+          "Kinesis Data StreamsやFirehoseをソース取り込みに使いAthenaで準リアルタイム分析する",
+          "RDSにすべて書き込んでJOINする",
+          "S3を使わずEC2にログを貯める"
+        ],
+        answer: 1,
+        wrongReasons: [
+          "QuickSightは可視化ツールであり、ストリーミング取り込み・処理は担いません。",
+          "この選択肢は正解です。",
+          "大量ログのリアルタイム処理にRDS直接書き込みは書き込み性能のボトルネックになりやすいです。",
+          "EC2単体にログを貯めると可用性・スケール性ともに課題が生じます。"
+        ],
+        explanation: "Kinesisでストリーミング取り込み、S3蓄積、Athenaでクエリという構成が費用対効果の高い選択です。"
+      }
+    ]
   }
 ];
 
@@ -655,26 +1271,40 @@ const feedback = document.getElementById("feedback");
 const scoreText = document.getElementById("scoreText");
 const resetBtn = document.getElementById("resetBtn");
 
+// Per-scenario state: keyed by scenario index
+const scenarioStates = {};
+
+function getScenarioState(index) {
+  if (!scenarioStates[index]) {
+    scenarioStates[index] = {
+      questionIndex: 0,
+      selected: null,
+      score: 0,
+      answered: new Set(),
+      feedbackHtml: "",
+      feedbackClass: "feedback"
+    };
+  }
+  return scenarioStates[index];
+}
+
 const state = {
   scenarioIndex: 0,
-  questionIndex: 0,
-  selected: null,
-  score: 0,
-  answered: new Set()
+  get current() { return getScenarioState(this.scenarioIndex); }
 };
 
 function renderScenarioButtons() {
   scenarioButtons.innerHTML = "";
   scenarios.forEach((scenario, index) => {
+    const s = getScenarioState(index);
+    const done = s.answered.size;
+    const total = scenario.questions.length;
     const button = document.createElement("button");
     button.className = "scenario-btn";
-    if (index === state.scenarioIndex) {
-      button.classList.add("active");
-    }
-    button.innerHTML = `<strong>${scenario.title}</strong><br><small>${scenario.questions.length}問</small>`;
+    if (index === state.scenarioIndex) button.classList.add("active");
+    button.innerHTML = `<strong>${scenario.title}</strong><br><small>${done}/${total}問解答済</small>`;
     button.addEventListener("click", () => {
       state.scenarioIndex = index;
-      resetScenarioState();
       renderAll();
     });
     scenarioButtons.appendChild(button);
@@ -682,10 +1312,14 @@ function renderScenarioButtons() {
 }
 
 function resetScenarioState() {
-  state.questionIndex = 0;
-  state.selected = null;
-  state.score = 0;
-  state.answered = new Set();
+  scenarioStates[state.scenarioIndex] = {
+    questionIndex: 0,
+    selected: null,
+    score: 0,
+    answered: new Set(),
+    feedbackHtml: "",
+    feedbackClass: "feedback"
+  };
 }
 
 function getNodeIcon(label) {
@@ -809,9 +1443,10 @@ function buildWrongOptionReasons(question) {
 
 function renderQuestion() {
   const scenario = scenarios[state.scenarioIndex];
-  const q = scenario.questions[state.questionIndex];
+  const cs = state.current;
+  const q = scenario.questions[cs.questionIndex];
 
-  questionCounter.textContent = `${state.questionIndex + 1} / ${scenario.questions.length}`;
+  questionCounter.textContent = `${cs.questionIndex + 1} / ${scenario.questions.length}`;
   questionText.textContent = q.prompt;
   optionsWrap.innerHTML = "";
 
@@ -819,25 +1454,26 @@ function renderQuestion() {
     const label = document.createElement("label");
     label.className = "option-item";
     label.innerHTML = `
-      <input type="radio" name="option" value="${i}" ${state.selected === i ? "checked" : ""} />
+      <input type="radio" name="option" value="${i}" ${cs.selected === i ? "checked" : ""} />
       <span>${opt}</span>
     `;
     const radio = label.querySelector("input");
     radio.addEventListener("change", () => {
-      state.selected = Number(radio.value);
+      cs.selected = Number(radio.value);
     });
     optionsWrap.appendChild(label);
   });
 
-  const key = `${state.scenarioIndex}-${state.questionIndex}`;
-  const answered = state.answered.has(key);
+  const key = `${state.scenarioIndex}-${cs.questionIndex}`;
+  const answered = cs.answered.has(key);
   submitBtn.disabled = answered;
   nextBtn.disabled = !answered;
 }
 
 function updateScore() {
   const scenario = scenarios[state.scenarioIndex];
-  scoreText.textContent = `正解数: ${state.score} / ${scenario.questions.length}`;
+  const cs = state.current;
+  scoreText.textContent = `正解数: ${cs.score} / ${scenario.questions.length}`;
 }
 
 function renderScenarioInfo() {
@@ -852,69 +1488,72 @@ function renderAll() {
   renderScenarioInfo();
   renderQuestion();
   updateScore();
-  feedback.className = "feedback";
-  feedback.textContent = "選択肢を選んで「解答する」を押してください。";
+  const cs = state.current;
+  if (cs.feedbackHtml) {
+    feedback.className = cs.feedbackClass;
+    feedback.innerHTML = cs.feedbackHtml;
+  } else {
+    feedback.className = "feedback";
+    feedback.textContent = "選択肢を選んで「解答する」を押してください。";
+  }
 }
 
 submitBtn.addEventListener("click", () => {
   const scenario = scenarios[state.scenarioIndex];
-  const q = scenario.questions[state.questionIndex];
+  const cs = state.current;
+  const q = scenario.questions[cs.questionIndex];
   const wrongReasons = buildWrongOptionReasons(q);
 
-  if (state.selected === null) {
+  if (cs.selected === null) {
     feedback.className = "feedback ng";
     feedback.textContent = "先に選択肢を1つ選んでください。";
     return;
   }
 
-  const key = `${state.scenarioIndex}-${state.questionIndex}`;
-  if (state.answered.has(key)) {
-    return;
-  }
+  const key = `${state.scenarioIndex}-${cs.questionIndex}`;
+  if (cs.answered.has(key)) return;
 
-  const isCorrect = state.selected === q.answer;
+  const isCorrect = cs.selected === q.answer;
   if (isCorrect) {
-    state.score += 1;
-    feedback.className = "feedback ok";
-    feedback.innerHTML = `<strong>正解です。</strong><br>${q.explanation}<br><br><strong>不正解選択肢の理由</strong><ul>${q.options
-      .map((opt, i) => {
-        if (i === q.answer) {
-          return "";
-        }
-        return `<li>${opt}: ${wrongReasons[i]}</li>`;
-      })
+    cs.score += 1;
+    cs.feedbackClass = "feedback ok";
+    cs.feedbackHtml = `<strong>正解です。</strong><br>${q.explanation}<br><br><strong>不正解選択肢の理由</strong><ul>${q.options
+      .map((opt, i) => i === q.answer ? "" : `<li>${opt}: ${wrongReasons[i]}</li>`)
       .join("")}</ul>`;
   } else {
-    feedback.className = "feedback ng";
-    feedback.innerHTML = `<strong>不正解です。</strong><br>あなたの選択: ${q.options[state.selected]}<br>なぜ不正解か: ${wrongReasons[state.selected]}<br><br>正解: ${q.options[q.answer]}<br>${q.explanation}<br><br><strong>他の不正解選択肢の理由</strong><ul>${q.options
-      .map((opt, i) => {
-        if (i === q.answer || i === state.selected) {
-          return "";
-        }
-        return `<li>${opt}: ${wrongReasons[i]}</li>`;
-      })
+    cs.feedbackClass = "feedback ng";
+    cs.feedbackHtml = `<strong>不正解です。</strong><br>あなたの選択: ${q.options[cs.selected]}<br>なぜ不正解か: ${wrongReasons[cs.selected]}<br><br>正解: ${q.options[q.answer]}<br>${q.explanation}<br><br><strong>他の不正解選択肢の理由</strong><ul>${q.options
+      .map((opt, i) => (i === q.answer || i === cs.selected) ? "" : `<li>${opt}: ${wrongReasons[i]}</li>`)
       .join("")}</ul>`;
   }
+  feedback.className = cs.feedbackClass;
+  feedback.innerHTML = cs.feedbackHtml;
 
-  state.answered.add(key);
+  cs.answered.add(key);
   submitBtn.disabled = true;
   nextBtn.disabled = false;
   updateScore();
+  renderScenarioButtons();
 });
 
 nextBtn.addEventListener("click", () => {
   const scenario = scenarios[state.scenarioIndex];
-  if (state.questionIndex < scenario.questions.length - 1) {
-    state.questionIndex += 1;
-    state.selected = null;
+  const cs = state.current;
+  if (cs.questionIndex < scenario.questions.length - 1) {
+    cs.questionIndex += 1;
+    cs.selected = null;
+    cs.feedbackHtml = "次の問題です。";
+    cs.feedbackClass = "feedback";
     renderQuestion();
     feedback.className = "feedback";
     feedback.textContent = "次の問題です。";
     return;
   }
 
-  feedback.className = "feedback ok";
-  feedback.innerHTML = `<strong>${scenario.title}を完了しました。</strong><br>スコアは ${state.score} / ${scenario.questions.length} です。別の構成図にも挑戦してみてください。`;
+  cs.feedbackClass = "feedback ok";
+  cs.feedbackHtml = `<strong>${scenario.title}を完了しました。</strong><br>スコアは ${cs.score} / ${scenario.questions.length} です。別の構成図にも挑戦してみてください。`;
+  feedback.className = cs.feedbackClass;
+  feedback.innerHTML = cs.feedbackHtml;
   nextBtn.disabled = true;
 });
 
