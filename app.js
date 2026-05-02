@@ -2008,7 +2008,42 @@ function drawDiagram(scenario) {
     .map(([from, to]) => {
       const f = map.get(from);
       const t = map.get(to);
-      return `<line x1="${f.x + 144}" y1="${f.y + 30}" x2="${t.x}" y2="${t.y + 30}" stroke="#475569" stroke-width="2" marker-end="url(#arrow)" />`;
+      const W = 144, H = 60;
+      const fcx = f.x + W / 2, fcy = f.y + H / 2;
+      const tcx = t.x + W / 2, tcy = t.y + H / 2;
+      const dx = tcx - fcx, dy = tcy - fcy;
+      const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+
+      let x1, y1, x2, y2;
+      if (ang >= -45 && ang <= 45) {
+        // Rightward: exit right, enter left
+        x1 = f.x + W; y1 = fcy; x2 = t.x;     y2 = tcy;
+      } else if (ang > 45 && ang <= 135) {
+        // Downward: exit bottom, enter top
+        x1 = fcx;     y1 = f.y + H; x2 = tcx; y2 = t.y;
+      } else if (ang < -45 && ang >= -135) {
+        // Upward: exit top, enter bottom
+        x1 = fcx;     y1 = f.y;     x2 = tcx; y2 = t.y + H;
+      } else {
+        // Leftward: exit left, enter right
+        x1 = f.x;     y1 = fcy;     x2 = t.x + W; y2 = tcy;
+      }
+
+      const ex = x2 - x1, ey = y2 - y1;
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      let d;
+      if (Math.abs(ex) < 8 || Math.abs(ey) < 8) {
+        // Nearly straight: simple line
+        d = `M ${x1} ${y1} L ${x2} ${y2}`;
+      } else if (Math.abs(ex) >= Math.abs(ey)) {
+        // Mostly horizontal: S-curve with vertical bend at midpoint
+        d = `M ${x1} ${y1} C ${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
+      } else {
+        // Mostly vertical: S-curve with horizontal bend at midpoint
+        d = `M ${x1} ${y1} C ${x1} ${my} ${x2} ${my} ${x2} ${y2}`;
+      }
+
+      return `<path d="${d}" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)" />`;
     })
     .join("");
 
